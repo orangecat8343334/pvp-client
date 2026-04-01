@@ -1,0 +1,12 @@
+{
+    "required": true,
+    "package": "com.pvpclient.mixin",
+    "compatibilityLevel": "JAVA_21",
+    "client": [
+        "ClientPlayerEntityMixin",
+        "MinecraftClientMixin"
+    ],
+    "injectors": {
+        "defaultRequire": 1
+    }
+}
