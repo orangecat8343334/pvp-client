@@ -89,6 +89,11 @@ public class TriggerBot {
 
         currentTarget = target;
         currentDelay = getWeaponDelay(player);
+        // Mark timer on first acquisition so the delay check works correctly.
+        // After the first attack, tickAttacking re-marks it.
+        if (attackTimer.elapsedMs() > 5000) {
+            attackTimer.markNow();
+        }
         state = State.WAITING_COOLDOWN;
     }
 

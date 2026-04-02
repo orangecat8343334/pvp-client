@@ -169,6 +169,9 @@ public class JumpResetManager {
     }
 
     private void finishReset(MinecraftClient client, ClientPlayerEntity player) {
+        // Restore keys BEFORE clearing snapshot, so the RETURN inject doesn't miss it
+        restoreMovementOverride(client, player);
+
         if (config.jumpResetAutoSprint || client.options.forwardKey.isPressed()) {
             player.setSprinting(true);
         }

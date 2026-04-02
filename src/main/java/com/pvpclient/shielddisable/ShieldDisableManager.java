@@ -106,6 +106,13 @@ public class ShieldDisableManager {
             return;
         }
 
+        // Wait for attack cooldown BEFORE switching to axe.
+        // Avoids sitting with axe out while cooldown recovers (looks suspicious,
+        // and if target drops shield we're stuck with a slow weapon).
+        if (CombatUtil.getAttackCooldown(player) < 0.9f) {
+            return;
+        }
+
         int axeSlot = findAxeSlot(player);
         if (axeSlot == -1) {
             resetState();

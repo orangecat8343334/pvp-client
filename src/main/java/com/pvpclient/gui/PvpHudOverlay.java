@@ -3,6 +3,7 @@ package com.pvpclient.gui;
 import com.pvpclient.PvpClientMod;
 import com.pvpclient.config.PvpConfig;
 import com.pvpclient.triggerbot.TriggerBot;
+import com.pvpclient.jumpreset.DefensiveJumpReset;
 import com.pvpclient.jumpreset.JumpResetManager;
 import com.pvpclient.shielddisable.ShieldDisableManager;
 import com.pvpclient.util.CombatUtil;
@@ -26,44 +27,62 @@ public class PvpHudOverlay implements HudRenderCallback {
         int lineHeight = 10;
 
         // Title
-        context.drawText(tr, "§6[PVP Client]", x, y, 0xFFFFFF, true);
+        context.drawText(tr, "\u00A76[\u00A7ePVP Client\u00A76]", x, y, 0xFFFFFF, true);
         y += lineHeight;
 
-        // TriggerBot status
+        // TriggerBot
         TriggerBot tb = PvpClientMod.getTriggerBot();
         if (tb != null) {
-            String tbStatus = tb.isEnabled()
-                    ? "§aTB §7[" + tb.getState().name() + "] §8Hits:" + tb.getAttackCount()
-                    : "§cTB OFF";
-            context.drawText(tr, tbStatus, x, y, 0xFFFFFF, true);
+            String status = tb.isEnabled()
+                    ? "\u00A7aTB \u00A77" + tb.getState().name() + " \u00A78" + tb.getAttackCount()
+                    : "\u00A78TB";
+            context.drawText(tr, status, x, y, 0xFFFFFF, true);
             y += lineHeight;
         }
 
-        // JumpReset status
+        // JumpReset (offensive)
         JumpResetManager jr = PvpClientMod.getJumpResetManager();
         if (jr != null) {
-            String jrStatus = jr.isEnabled()
-                    ? "§aJR §7[" + jr.getActiveResetMethod().name() + "] §8Resets:" + jr.getResetCount()
-                    : "§cJR OFF";
-            context.drawText(tr, jrStatus, x, y, 0xFFFFFF, true);
+            String status = jr.isEnabled()
+                    ? "\u00A7aJR \u00A77" + jr.getActiveResetMethod().name()
+                      + (jr.getState() != JumpResetManager.State.IDLE ? " \u00A7e" + jr.getState().name() : "")
+                      + " \u00A78" + jr.getResetCount()
+                    : "\u00A78JR";
+            context.drawText(tr, status, x, y, 0xFFFFFF, true);
             y += lineHeight;
         }
 
-        // ShieldDisable status
+        // ShieldDisable
         ShieldDisableManager sd = PvpClientMod.getShieldDisableManager();
         if (sd != null) {
-            String sdStatus = sd.isEnabled()
-                    ? "§aSD §7[" + sd.getState().name() + "] §8Disables:" + sd.getDisableCount()
-                    : "§cSD OFF";
-            context.drawText(tr, sdStatus, x, y, 0xFFFFFF, true);
+            String status = sd.isEnabled()
+                    ? "\u00A7aSD"
+                      + (sd.getState() != ShieldDisableManager.State.IDLE ? " \u00A7e" + sd.getState().name() : "")
+                      + " \u00A78" + sd.getDisableCount()
+                    : "\u00A78SD";
+            context.drawText(tr, status, x, y, 0xFFFFFF, true);
             y += lineHeight;
         }
 
-        // Attack cooldown bar
+        // Defensive Jump Reset (KB reduce)
+        DefensiveJumpReset djr = PvpClientMod.getDefensiveJumpReset();
+        if (djr != null) {
+            String status = djr.isEnabled()
+                    ? "\u00A7aKB \u00A78" + djr.getJumpCount()
+                    : "\u00A78KB";
+            context.drawText(tr, status, x, y, 0xFFFFFF, true);
+            y += lineHeight;
+        }
+
+        // NoMissDelay
+        if (config.noMissDelayEnabled) {
+            context.drawText(tr, "\u00A7aNM", x, y, 0xFFFFFF, true);
+            y += lineHeight;
+        }
+
+        // Cooldown bar
         float cooldown = CombatUtil.getAttackCooldown(client.player);
-        int barWidth = 60;
-        int filled = (int) (cooldown * barWidth);
-        String cdColor = cooldown >= 0.9f ? "§a" : cooldown >= 0.5f ? "§e" : "§c";
-        context.drawText(tr, cdColor + String.format("CD: %.0f%%", cooldown * 100), x, y, 0xFFFFFF, true);
+        String cdColor = cooldown >= 0.9f ? "\u00A7a" : cooldown >= 0.5f ? "\u00A7e" : "\u00A7c";
+        context.drawText(tr, cdColor + String.format("%.0f%%", cooldown * 100), x, y, 0xFFFFFF, true);
     }
 }
