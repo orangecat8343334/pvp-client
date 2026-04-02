@@ -12,6 +12,7 @@ import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.entity.LivingEntity;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,10 +93,18 @@ public class PvpClientMod implements ClientModInitializer {
         }
 
         // Tick each module
+        if (shieldDisableManager.isEnabled()) shieldDisableManager.tick(client);
         if (triggerBot.isEnabled()) triggerBot.tick(client);
         if (jumpResetManager.isEnabled()) jumpResetManager.tick(client);
-        if (shieldDisableManager.isEnabled()) shieldDisableManager.tick(client);
         if (defensiveJumpReset.isEnabled()) defensiveJumpReset.tick(client);
+    }
+
+    public static void notifyAttackLanded(LivingEntity target) {
+        if (target == null || jumpResetManager == null || !jumpResetManager.isEnabled()) {
+            return;
+        }
+
+        jumpResetManager.onAttackEntity(target);
     }
 
     public static TriggerBot getTriggerBot() { return triggerBot; }

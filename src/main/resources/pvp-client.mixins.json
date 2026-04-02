@@ -3,8 +3,9 @@
     "package": "com.pvpclient.mixin",
     "compatibilityLevel": "JAVA_21",
     "client": [
+        "ClientPlayerInteractionManagerAccessor",
         "ClientPlayerEntityMixin",
-        "MinecraftClientMixin"
+        "ClientPlayerInteractionManagerMixin"
     ],
     "injectors": {
         "defaultRequire": 1

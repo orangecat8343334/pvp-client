@@ -25,6 +25,10 @@ public class CombatUtil {
      * Check if the player is looking at a living entity within reach.
      */
     public static LivingEntity getTargetEntity(MinecraftClient client, float maxReach) {
+        if (client.player == null) {
+            return null;
+        }
+
         if (client.crosshairTarget != null
                 && client.crosshairTarget.getType() == HitResult.Type.ENTITY) {
             Entity entity = ((EntityHitResult) client.crosshairTarget).getEntity();
@@ -36,6 +40,13 @@ public class CombatUtil {
             }
         }
         return null;
+    }
+
+    /**
+     * Check whether the given target is still under the crosshair and inside reach.
+     */
+    public static boolean isTargetUnderCrosshair(MinecraftClient client, LivingEntity target, float maxReach) {
+        return target != null && target == getTargetEntity(client, maxReach);
     }
 
     /**
@@ -73,6 +84,13 @@ public class CombatUtil {
         ).normalize();
 
         return facing.dotProduct(dirToAttacker) < 0;
+    }
+
+    /**
+     * Check whether the target's shield is actively covering us.
+     */
+    public static boolean isShieldBlockingUs(PlayerEntity target, ClientPlayerEntity attacker) {
+        return target.isBlocking() && !isShieldFacingAway(target, attacker);
     }
 
     /**

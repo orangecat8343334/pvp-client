@@ -2,12 +2,14 @@ package com.pvpclient.shielddisable;
 
 import com.pvpclient.PvpClientMod;
 import com.pvpclient.config.PvpConfig;
+import com.pvpclient.mixin.ClientPlayerInteractionManagerAccessor;
 import com.pvpclient.util.CombatUtil;
 import com.pvpclient.util.TimingUtil;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.AxeItem;
 import net.minecraft.item.Items;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
@@ -15,17 +17,7 @@ import net.minecraft.util.Hand;
 /**
  * ShieldDisableManager - Automatically disables opponent shields with axe.
  *
- * In 1.9+ PVP, axes disable shields for 5 seconds (100 ticks) on hit.
- * This module detects when an opponent is blocking with a shield and
- * automatically performs the sequence:
- *
- * 1. Detect target is blocking (shield up)
- * 2. Switch hotbar to axe slot
- * 3. Wait a tick for server to register slot change
- * 4. Attack target (axe hit disables shield)
- * 5. Switch back to sword
- *
- * State machine: IDLE -> DETECTED_SHIELD -> SWITCHING_TO_AXE -> ATTACKING -> SWITCHING_BACK -> COOLDOWN -> IDLE
+ * State machine: IDLE -> DETECTED_SHIELD -> SWITCHING_TO_AXE -> ATTACKING -> SWITCHING_BACK -> COOLDOWN
  */
 public class ShieldDisableManager {
     public enum State {
@@ -55,16 +47,22 @@ public class ShieldDisableManager {
         enabled = !enabled;
         config.shieldDisableEnabled = enabled;
         config.save();
-        state = State.IDLE;
-        currentTarget = null;
+        resetState();
         MinecraftClient.getInstance().player.sendMessage(
-                Text.literal("§6[PVP] §fShield Disable: " + (enabled ? "§aON" : "§cOFF")), true);
+                Text.literal("\u00A76[PVP] \u00A7fShield Disable: " + (enabled ? "\u00A7aON" : "\u00A7cOFF")), true);
     }
 
     public void tick(MinecraftClient client) {
         ClientPlayerEntity player = client.player;
-        if (player == null || player.isDead()) {
-            state = State.IDLE;
+        if (player == null
+                || player.isDead()
+                || player.isUsingItem()
+                || client.interactionManager == null
+                || client.currentScreen != null) {
+            if (player != null) {
+                revertSlot(client, player);
+            }
+            resetState();
             return;
         }
 
@@ -74,121 +72,200 @@ public class ShieldDisableManager {
             case SWITCHING_TO_AXE -> tickSwitchingToAxe(client, player);
             case ATTACKING -> tickAttacking(client, player);
             case SWITCHING_BACK -> tickSwitchingBack(client, player);
-            case COOLDOWN -> tickCooldown(client, player);
+            case COOLDOWN -> tickCooldown();
         }
     }
 
     private void tickIdle(MinecraftClient client, ClientPlayerEntity player) {
-        if (!config.shieldAutoDetect) return;
-
-        // Look for a blocking target
-        LivingEntity target = CombatUtil.getTargetEntity(client, 3.5f);
-        if (target == null) return;
-
-        // Must be a player holding a shield and actively blocking
-        if (target instanceof PlayerEntity playerTarget
-                && playerTarget.isHolding(Items.SHIELD)
-                && playerTarget.isBlocking()) {
-
-            // If shield faces away from us, skip — we can just hit normally
-            if (CombatUtil.isShieldFacingAway(playerTarget, player)) return;
-
-            currentTarget = target;
-            state = State.DETECTED_SHIELD;
-            actionTimer.markNow();
-            PvpClientMod.LOGGER.debug("[Shield Disable] Detected shield on target");
+        if (!config.shieldAutoDetect) {
+            return;
         }
+
+        LivingEntity target = getShieldTarget(client, player);
+        if (target == null) {
+            return;
+        }
+
+        currentTarget = target;
+        state = State.DETECTED_SHIELD;
+        actionTimer.markNow();
     }
 
     private void tickDetected(MinecraftClient client, ClientPlayerEntity player) {
-        // Verify target is still blocking
-        if (currentTarget == null || !currentTarget.isAlive() || !CombatUtil.isBlocking(currentTarget)) {
-            state = State.IDLE;
-            currentTarget = null;
+        if (!isStillValidTarget(client, player, currentTarget)) {
+            resetState();
             return;
         }
 
-        if (!config.shieldAutoSwitch) return;
-
-        // Find axe - prefer configured slot, fallback to search
-        int axeSlot = config.shieldAxeSlot;
-        if (!(player.getInventory().getStack(axeSlot).getItem() instanceof net.minecraft.item.AxeItem)) {
-            axeSlot = CombatUtil.findAxeInHotbar(player);
+        if (!config.shieldAutoSwitch) {
+            if (CombatUtil.isHoldingAxe(player)) {
+                state = State.ATTACKING;
+            } else {
+                resetState();
+            }
+            return;
         }
 
+        int axeSlot = findAxeSlot(player);
         if (axeSlot == -1) {
-            // No axe found, can't disable shield
-            state = State.IDLE;
+            resetState();
             return;
         }
 
-        // Save current slot and switch to axe
         previousSlot = player.getInventory().selectedSlot;
-        player.getInventory().selectedSlot = axeSlot;
+        if (previousSlot != axeSlot) {
+            selectHotbarSlot(client, player, axeSlot);
+        }
+
         state = State.SWITCHING_TO_AXE;
         actionTimer.markNow();
     }
 
     private void tickSwitchingToAxe(MinecraftClient client, ClientPlayerEntity player) {
-        // Wait for switch delay (let server register the slot change)
-        if (!actionTimer.hasElapsed(config.shieldSwitchDelayMs)) return;
-
-        // Verify target still valid and in range
-        if (currentTarget == null || !currentTarget.isAlive()) {
-            revertSlot(player);
-            state = State.IDLE;
+        if (!isStillValidTarget(client, player, currentTarget)) {
+            revertSlot(client, player);
+            resetState();
             return;
         }
 
-        // Check cooldown is ready
-        float cooldown = CombatUtil.getAttackCooldown(player);
-        if (cooldown >= 0.9f) {
+        if (!actionTimer.hasElapsed(config.shieldSwitchDelayMs)) {
+            return;
+        }
+
+        if (CombatUtil.getAttackCooldown(player) >= 0.9f) {
             state = State.ATTACKING;
         }
     }
 
     private void tickAttacking(MinecraftClient client, ClientPlayerEntity player) {
-        if (currentTarget != null && currentTarget.isAlive()) {
-            // Execute axe attack to disable shield
+        if (isStillValidTarget(client, player, currentTarget)) {
             client.interactionManager.attackEntity(player, currentTarget);
             player.swingHand(Hand.MAIN_HAND);
             disableCount++;
-            PvpClientMod.LOGGER.debug("[Shield Disable] Axe hit landed - shield disabled");
         }
 
-        state = State.SWITCHING_BACK;
-        actionTimer.markNow();
-    }
+        currentTarget = null;
+        if (previousSlot != -1 && previousSlot != player.getInventory().selectedSlot) {
+            state = State.SWITCHING_BACK;
+            actionTimer.markNow();
+            return;
+        }
 
-    private void tickSwitchingBack(MinecraftClient client, ClientPlayerEntity player) {
-        // Wait before switching back
-        if (!actionTimer.hasElapsed(config.shieldSwitchBackDelayMs)) return;
-
-        revertSlot(player);
         state = State.COOLDOWN;
         cooldownTimer.markNow();
     }
 
-    private void tickCooldown(MinecraftClient client, ClientPlayerEntity player) {
-        // Shield is disabled for 5 seconds, don't need to check again immediately
-        // Use a 1-second cooldown before re-scanning
+    private void tickSwitchingBack(MinecraftClient client, ClientPlayerEntity player) {
+        if (!actionTimer.hasElapsed(config.shieldSwitchBackDelayMs)) {
+            return;
+        }
+
+        revertSlot(client, player);
+        currentTarget = null;
+        state = State.COOLDOWN;
+        cooldownTimer.markNow();
+    }
+
+    private void tickCooldown() {
         if (cooldownTimer.hasElapsed(1000)) {
-            state = State.IDLE;
-            currentTarget = null;
+            resetState();
         }
     }
 
-    private void revertSlot(ClientPlayerEntity player) {
-        if (previousSlot >= 0 && previousSlot <= 8) {
-            player.getInventory().selectedSlot = previousSlot;
-            previousSlot = -1;
+    public boolean shouldTakePriority(MinecraftClient client, LivingEntity target) {
+        ClientPlayerEntity player = client.player;
+        if (!enabled || !config.shieldAutoDetect || player == null || target == null) {
+            return false;
         }
+
+        if (state == State.COOLDOWN) {
+            return false;
+        }
+
+        if (state != State.IDLE) {
+            return target == currentTarget || canHandleTarget(player, target);
+        }
+
+        return canHandleTarget(player, target);
+    }
+
+    private boolean canHandleTarget(ClientPlayerEntity player, LivingEntity target) {
+        if (!isShieldTarget(player, target)) {
+            return false;
+        }
+
+        return CombatUtil.isHoldingAxe(player) || findAxeSlot(player) != -1;
+    }
+
+    private LivingEntity getShieldTarget(MinecraftClient client, ClientPlayerEntity player) {
+        LivingEntity target = CombatUtil.getTargetEntity(client, getDetectionReach());
+        if (target == null || !CombatUtil.isTargetUnderCrosshair(client, target, getDetectionReach())) {
+            return null;
+        }
+
+        return isShieldTarget(player, target) ? target : null;
+    }
+
+    private boolean isStillValidTarget(MinecraftClient client, ClientPlayerEntity player, LivingEntity target) {
+        return target != null
+                && target.isAlive()
+                && CombatUtil.isTargetUnderCrosshair(client, target, getDetectionReach())
+                && isShieldTarget(player, target);
+    }
+
+    private boolean isShieldTarget(ClientPlayerEntity player, LivingEntity target) {
+        if (!(target instanceof PlayerEntity playerTarget)) {
+            return false;
+        }
+
+        return playerTarget.isHolding(Items.SHIELD)
+                && CombatUtil.isShieldBlockingUs(playerTarget, player);
+    }
+
+    private int findAxeSlot(ClientPlayerEntity player) {
+        int configuredSlot = config.shieldAxeSlot;
+        if (configuredSlot >= 0
+                && configuredSlot <= 8
+                && player.getInventory().getStack(configuredSlot).getItem() instanceof AxeItem) {
+            return configuredSlot;
+        }
+
+        return CombatUtil.findAxeInHotbar(player);
+    }
+
+    private float getDetectionReach() {
+        return Math.max(3.0f, config.triggerReach);
+    }
+
+    private void selectHotbarSlot(MinecraftClient client, ClientPlayerEntity player, int slot) {
+        player.getInventory().selectedSlot = slot;
+        ((ClientPlayerInteractionManagerAccessor) client.interactionManager).pvpClient$syncSelectedSlot();
+    }
+
+    private void revertSlot(MinecraftClient client, ClientPlayerEntity player) {
+        if (previousSlot < 0 || previousSlot > 8) {
+            previousSlot = -1;
+            return;
+        }
+
+        if (player.getInventory().selectedSlot != previousSlot) {
+            selectHotbarSlot(client, player, previousSlot);
+        }
+
+        previousSlot = -1;
+    }
+
+    private void resetState() {
+        state = State.IDLE;
+        currentTarget = null;
+        previousSlot = -1;
     }
 
     public boolean isEnabled() { return enabled; }
     public State getState() { return state; }
     public int getDisableCount() { return disableCount; }
     public LivingEntity getCurrentTarget() { return currentTarget; }
+
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
         config.shieldDisableEnabled = enabled;
