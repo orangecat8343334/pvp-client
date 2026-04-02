@@ -7,6 +7,8 @@ import com.pvpclient.util.TimingUtil;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.Items;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 
@@ -83,7 +85,14 @@ public class ShieldDisableManager {
         LivingEntity target = CombatUtil.getTargetEntity(client, 3.5f);
         if (target == null) return;
 
-        if (CombatUtil.isBlocking(target)) {
+        // Must be a player holding a shield and actively blocking
+        if (target instanceof PlayerEntity playerTarget
+                && playerTarget.isHolding(Items.SHIELD)
+                && playerTarget.isBlocking()) {
+
+            // If shield faces away from us, skip — we can just hit normally
+            if (CombatUtil.isShieldFacingAway(playerTarget, player)) return;
+
             currentTarget = target;
             state = State.DETECTED_SHIELD;
             actionTimer.markNow();

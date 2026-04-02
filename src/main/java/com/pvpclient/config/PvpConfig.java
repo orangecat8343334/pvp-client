@@ -17,18 +17,26 @@ public class PvpConfig {
     public boolean triggerBotEnabled = false;
     /** Minimum attack cooldown % before triggering (0.0 - 1.0). 1.0 = full charge */
     public float triggerMinCooldown = 0.9f;
-    /** Extra delay (ms) after cooldown is ready before attacking. Adds humanization */
-    public int triggerDelayMs = 0;
-    /** Randomize delay by +/- this many ms for anti-detection */
-    public int triggerRandomMs = 20;
-    /** Only trigger when crosshair is on entity */
-    public boolean triggerRequireCrosshair = true;
+    /** Sword delay range (ms) — randomized between min/max each swing */
+    public int triggerSwordDelayMin = 540;
+    public int triggerSwordDelayMax = 560;
+    /** Axe delay range (ms) — longer cooldown weapon */
+    public int triggerAxeDelayMin = 780;
+    public int triggerAxeDelayMax = 810;
     /** Max reach distance to trigger attack */
     public float triggerReach = 3.0f;
-    /** Prioritize crits (only attack while falling) */
+    /** Crit-only with sword (wait for falling) */
+    public boolean triggerCritSword = false;
+    /** Crit-only with axe */
+    public boolean triggerCritAxe = false;
+    /** Legacy: crit-only for all items */
     public boolean triggerCritsOnly = false;
     /** Target players only (ignore mobs) */
     public boolean triggerPlayersOnly = false;
+    /** Skip attack if target is shielding toward us (let ShieldDisable handle) */
+    public boolean triggerCheckShield = true;
+    /** Don't attack while ascending (save crit window) */
+    public boolean triggerAntiAscend = false;
 
     // === Jump Reset Settings ===
     public boolean jumpResetEnabled = false;
@@ -61,6 +69,20 @@ public class PvpConfig {
     public int shieldSwitchDelayMs = 50;
     /** Delay (ms) after axe hit before switching back to sword */
     public int shieldSwitchBackDelayMs = 50;
+
+    // === Defensive Jump Reset (KB Reduce) ===
+    public boolean defensiveJumpResetEnabled = false;
+    /** Chance (0-100) to jump when hit. Randomization for anti-detection */
+    public int defensiveJumpChance = 100;
+
+    // === No Miss Delay ===
+    public boolean noMissDelayEnabled = true;
+    /** Cancel attacks on air (preserve cooldown) */
+    public boolean noMissCancelAir = true;
+    /** Cancel attacks on blocks (preserve cooldown) */
+    public boolean noMissCancelBlocks = false;
+    /** Only apply to swords/axes */
+    public boolean noMissOnlyWeapons = true;
 
     // === HUD Settings ===
     public boolean hudEnabled = true;

@@ -7,19 +7,26 @@ import com.pvpclient.util.TimingUtil;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.AxeItem;
+import net.minecraft.item.SwordItem;
 import net.minecraft.text.Text;
+import net.minecraft.util.Hand;
+import net.minecraft.util.hit.HitResult;
+
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * TriggerBot - Automatically attacks when conditions are met.
  *
- * Core logic:
- * 1. Wait for attack cooldown to reach threshold (configurable, default 90%)
- * 2. Check if crosshair is on a valid target within reach
- * 3. Optionally wait for crit conditions (falling, not on ground)
- * 4. Apply humanized delay with jitter
- * 5. Execute attack
+ * Inspired by argon's TriggerBot with improvements:
+ * - Separate sword/axe delays with min-max random ranges
+ * - Shield facing check (don't waste axe disable if shield faces away)
+ * - No-miss: skip attacks on air/blocks to preserve cooldown
+ * - Crit-only mode per weapon type
+ * - Anti-ascend: don't attack while rising (wastes crit window)
  *
- * State machine: IDLE -> WAITING_COOLDOWN -> WAITING_CRIT -> ATTACKING -> IDLE
+ * State machine: IDLE -> WAITING_COOLDOWN -> WAITING_CRIT -> READY -> ATTACKING
  */
 public class TriggerBot {
     public enum State {
@@ -36,6 +43,7 @@ public class TriggerBot {
     private final TimingUtil attackTimer = new TimingUtil();
     private LivingEntity currentTarget;
     private int attackCount = 0;
+    private int currentDelay = 0;
 
     public TriggerBot(PvpConfig config) {
         this.config = config;
@@ -69,17 +77,30 @@ public class TriggerBot {
     }
 
     private void tickIdle(MinecraftClient client, ClientPlayerEntity player) {
-        // Look for a target
+        // No-miss: only proceed if crosshair is on an entity
+        if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) return;
+
         LivingEntity target = CombatUtil.getTargetEntity(client, config.triggerReach);
         if (target == null) return;
         if (config.triggerPlayersOnly && !CombatUtil.isPlayer(target)) return;
 
+        // Check if target is shielding and we're in front — let ShieldDisable handle it
+        if (target instanceof PlayerEntity playerTarget && playerTarget.isBlocking()) {
+            if (!CombatUtil.isShieldFacingAway(playerTarget, player)) {
+                // Shield is facing us — skip if we're holding a sword (ShieldDisable will handle axe swap)
+                if (CombatUtil.isHoldingSword(player) && config.triggerCheckShield) {
+                    return;
+                }
+            }
+        }
+
         currentTarget = target;
+        // Randomize delay based on weapon type (like argon's MinMaxSetting)
+        currentDelay = getWeaponDelay(player);
         state = State.WAITING_COOLDOWN;
     }
 
     private void tickWaitingCooldown(MinecraftClient client, ClientPlayerEntity player) {
-        // Verify target is still valid
         LivingEntity target = CombatUtil.getTargetEntity(client, config.triggerReach);
         if (target == null || (config.triggerPlayersOnly && !CombatUtil.isPlayer(target))) {
             state = State.IDLE;
@@ -88,10 +109,12 @@ public class TriggerBot {
         }
         currentTarget = target;
 
-        // Check cooldown threshold
+        // Don't attack while ascending (wastes crit opportunity)
+        if (config.triggerAntiAscend && CombatUtil.isAscending(player)) return;
+
         float cooldown = CombatUtil.getAttackCooldown(player);
         if (cooldown >= config.triggerMinCooldown) {
-            if (config.triggerCritsOnly) {
+            if (shouldWaitForCrit(player)) {
                 state = State.WAITING_CRIT;
             } else {
                 attackTimer.markNow();
@@ -101,48 +124,65 @@ public class TriggerBot {
     }
 
     private void tickWaitingCrit(MinecraftClient client, ClientPlayerEntity player) {
-        // Re-check target
         LivingEntity target = CombatUtil.getTargetEntity(client, config.triggerReach);
         if (target == null) {
             state = State.IDLE;
             return;
         }
 
-        // Wait for crit conditions
         if (CombatUtil.canCrit(player)) {
             attackTimer.markNow();
             state = State.READY;
         }
 
-        // Fallback: if cooldown is resetting, go back to waiting
+        // Fallback: if cooldown is resetting, go back
         if (CombatUtil.getAttackCooldown(player) < config.triggerMinCooldown * 0.5f) {
             state = State.WAITING_COOLDOWN;
         }
     }
 
     private void tickReady(MinecraftClient client, ClientPlayerEntity player) {
-        // Re-check target
         LivingEntity target = CombatUtil.getTargetEntity(client, config.triggerReach);
         if (target == null) {
             state = State.IDLE;
             return;
         }
 
-        // Wait for humanized delay
-        if (attackTimer.hasElapsedWithJitter(config.triggerDelayMs, config.triggerRandomMs)) {
+        if (attackTimer.hasElapsed(currentDelay)) {
             state = State.ATTACKING;
         }
     }
 
     private void tickAttacking(MinecraftClient client, ClientPlayerEntity player) {
         if (currentTarget != null && currentTarget.isAlive()) {
-            // Execute the attack
             client.interactionManager.attackEntity(player, currentTarget);
-            player.swingHand(net.minecraft.util.Hand.MAIN_HAND);
+            player.swingHand(Hand.MAIN_HAND);
             attackCount++;
         }
         state = State.IDLE;
         currentTarget = null;
+    }
+
+    /**
+     * Get randomized delay based on held weapon type.
+     * Sword: faster cooldown, shorter delay. Axe: slower cooldown, longer delay.
+     */
+    private int getWeaponDelay(ClientPlayerEntity player) {
+        if (CombatUtil.isHoldingAxe(player)) {
+            return randomInRange(config.triggerAxeDelayMin, config.triggerAxeDelayMax);
+        }
+        return randomInRange(config.triggerSwordDelayMin, config.triggerSwordDelayMax);
+    }
+
+    private boolean shouldWaitForCrit(ClientPlayerEntity player) {
+        if (CombatUtil.isHoldingAxe(player)) return config.triggerCritAxe;
+        if (CombatUtil.isHoldingSword(player)) return config.triggerCritSword;
+        return config.triggerCritsOnly;
+    }
+
+    private static int randomInRange(int min, int max) {
+        if (min >= max) return min;
+        return ThreadLocalRandom.current().nextInt(min, max + 1);
     }
 
     public boolean isEnabled() { return enabled; }

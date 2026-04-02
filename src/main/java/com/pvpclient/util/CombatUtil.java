@@ -4,10 +4,12 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.*;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.Vec3d;
 
 public class CombatUtil {
 
@@ -38,16 +40,47 @@ public class CombatUtil {
 
     /**
      * Check if the player can land a critical hit right now.
-     * Conditions: falling (velocity Y < 0), not on ground, not in water,
-     * not climbing, not blind, not riding.
+     * Matches vanilla conditions from PlayerEntity.attack():
+     * fallDistance > 0, not on ground, not climbing, not in water,
+     * no blindness, not riding, not sprinting, cooldown > 0.9
      */
     public static boolean canCrit(ClientPlayerEntity player) {
-        return player.fallDistance > 0.0f
+        return player.getAttackCooldownProgress(0.5f) > 0.9f
+                && player.fallDistance > 0.0f
                 && !player.isOnGround()
                 && !player.isClimbing()
-                && !player.isTouchingWater()
+                && !player.isSubmergedInWater()
+                && !player.hasStatusEffect(StatusEffects.BLINDNESS)
                 && !player.hasVehicle()
                 && !player.isSprinting();
+    }
+
+    /**
+     * Check if a player's shield is facing away from us (we can hit from behind).
+     * Uses dot product: target's facing direction vs direction from target to us.
+     * If dot < 0, shield faces away — we can bypass it without axe.
+     * Ported from argon's WorldUtils.isShieldFacingAway().
+     */
+    public static boolean isShieldFacingAway(PlayerEntity target, ClientPlayerEntity attacker) {
+        Vec3d dirToAttacker = attacker.getPos().subtract(target.getPos()).normalize();
+
+        float yaw = target.getYaw();
+        float pitch = target.getPitch();
+        Vec3d facing = new Vec3d(
+                -Math.sin(Math.toRadians(yaw)) * Math.cos(Math.toRadians(pitch)),
+                -Math.sin(Math.toRadians(pitch)),
+                Math.cos(Math.toRadians(yaw)) * Math.cos(Math.toRadians(pitch))
+        ).normalize();
+
+        return facing.dotProduct(dirToAttacker) < 0;
+    }
+
+    /**
+     * Check if player is ascending (just jumped, Y velocity > 0).
+     * Useful to avoid attacking while rising (wastes crit opportunity).
+     */
+    public static boolean isAscending(ClientPlayerEntity player) {
+        return !player.isOnGround() && player.getVelocity().y > 0;
     }
 
     /**
